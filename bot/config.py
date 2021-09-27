@@ -1,0 +1,58 @@
+import requests
+import json
+import re
+from datetime import datetime
+
+
+def RealTimeCurrencyExchangeRate(from_currency, to_currency, api_key):
+    # base_url variable store base url
+    base_url = r"https://www.alphavantage.co/query?function = CURRENCY_EXCHANGE_RATE"
+
+    # main_url variable store complete url
+    main_url = base_url + "&from_currency =" + from_currency + "&to_currency =" + to_currency + "&apikey =" + api_key
+    # get method of requests module
+    # return response object
+    req_ob = requests.get(main_url)
+
+    # json method return json format
+    # data into python dictionary data type.
+
+    # result contains list of nested dictionaries
+    result = req_ob.json()
+    print(" Result before parsing the json data :\n", result)
+
+    print("\n After parsing : \n Realtime Currency Exchange Rate for",
+          result["Realtime Currency Exchange Rate"]
+          ["2. From_Currency Name"], "TO",
+          result["Realtime Currency Exchange Rate"]
+          ["4. To_Currency Name"], "is",
+          result["Realtime Currency Exchange Rate"]
+          ['5. Exchange Rate'], to_currency)
+
+
+# Имя бота
+bot_name = "dew_test_bot"
+bot_link = f"https://t.me/{bot_name}"
+
+# Права администратора
+admins = (330639572, 1537126137, 410785491, 1417744142, 333583210)
+
+# Кнопка играть
+SPIN_TEXT = "🎰 Крутить"
+
+# Testing Keys
+# public_key = "48e7qUxn9T7RyYE1MVZswX1FRSbE6iyCj2gCRwwF3Dnh5XrasNTx3BGPiMsyXQFNKQhvukniQG8RTVhYm3iPugctimJ3hHQqBm8Lge6baGj2vhAL61CmHMtytaFg5yBCZGA7dXMuwfRA3DPqaszyn4cZGctjsoDJTmBLdBVrCRJhVJB8HWyvVHMUgUhik"
+# secret_key = "eyJ2ZXJzaW9uIjoiUDJQIiwiZGF0YSI6eyJwYXlpbl9tZXJjaGFudF9zaXRlX3VpZCI6Im1uOXppcS0wMCIsInVzZXJfaWQiOiI3OTUyODA3MTg4NCIsInNlY3JldCI6IjUyNGMwOWYzNjJhNTZmNmNlZmE1NzEyNTI1M2Q4MDU0NWFiNWUzYjM2ZWVmNGY2YTA1YjAyN2NhYzlkZGIwZjEifX0="
+# api_access_token = "cbac4abd1518613acd3e09d275abf2f2"
+# COINBASE_API_KEY = "c1b6cc71-7bcc-4740-94b0-1e625a3822a9"
+
+
+public_key = "48e7qUxn9T7RyYE1MVZswX1FRSbE6iyCj2gCRwwF3Dnh5XrasNTx3BGPiMsyXQFNKQhvukniQG8RTVhYm3iP4rNgj2WQkfDnCsQsVKXpFgdcS1xy6wrq5ChxRH9VHB87N8hUziFsDMgmMvn5wp7KLSuvqtwpDm6qtLJ9AY9wQgB48QZX7guhihiPET7mD"
+secret_key = "eyJ2ZXJzaW9uIjoiUDJQIiwiZGF0YSI6eyJwYXlpbl9tZXJjaGFudF9zaXRlX3VpZCI6IjM3cDQ0ci0wMCIsInVzZXJfaWQiOiI3OTA0MzA5NTg1MCIsInNlY3JldCI6ImJiNmE0YjNjNWZiMGExYmEwODU5ZjYzZTBhMGI0MWU0OTg4ZGU3ZDIxM2M2ZDM3NDRlNjVkMGMxNzE2ZTYzNDEifX0="
+dollar = 73.0
+# api_access_token = "R84796LA6M723U47"
+
+
+COINBASE_API_KEY = "2db246d3-d58d-4a52-9aaa-421b64bf7874"
+
+ROFL_VIDEO_ID = "BAACAgIAAxkBAAIqQWFDRGYeUYwsHagnHB9YUf-C6o3AAAL4DQACgkgYSki1Hogj89koIAQ"

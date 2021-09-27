@@ -109,6 +109,7 @@ def platform_stat_message(stats):
 
 def user_stat_message(user):
     text = f"Пользователь {user['user_name']}:\n" \
+           f"ID: {user['user_id']}\n" \
            f"Баланс: {user['balance']}$\n" \
            f"Страховка: {user['insurance']}$\n" \
            f"___________\n" \
@@ -130,7 +131,7 @@ def promocodes_keyboard():
     return keyboard
 
 
-def ref_links_keyboard():
+def channels_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     buttons = ('Создать реф. ссылку', 'Созданные реф. ссылки', 'Назад')
     keyboard.add(*(types.KeyboardButton(text) for text in buttons))
@@ -145,7 +146,7 @@ def deposit_method_keyboard(user_id: int, amount: float):
     :return: keyboard
     """
     keyboard = types.InlineKeyboardMarkup(row_width=1)
-    keyboard.add(types.InlineKeyboardButton(text='QIWI', callback_data=f'deposit_{user_id}_qiwi_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='QIWI ($/₽)', callback_data=f'deposit_{user_id}_qiwi_{amount}'))
     keyboard.add(types.InlineKeyboardButton(text='BTC/ETH', callback_data=f'deposit_{user_id}_crypto_{amount}'))
     return keyboard
 
@@ -158,8 +159,16 @@ def withdraw_method_keyboard(user_id: int, amount: float):
     :return: keyboard
     """
     keyboard = types.InlineKeyboardMarkup(row_width=1)
-    keyboard.add(types.InlineKeyboardButton(text='QIWI', callback_data=f'withdraw_{user_id}_qiwi_{amount}'))
-    keyboard.add(types.InlineKeyboardButton(text='BTC/ETH', callback_data=f'withdraw_{user_id}_crypto_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='VISA/MasterCard', callback_data=f'withdraw_{user_id}_card_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='BTC', callback_data=f'withdraw_{user_id}_crypto_{amount}'))
+    return keyboard
+
+
+def withdraw_accept_keyboard(withdraw_id):
+    keyboard = types.InlineKeyboardMarkup(row_width=2)
+    btn1 = types.InlineKeyboardButton(text='Подтвердить', callback_data=f'accept-withdraw-yes_{withdraw_id}')
+    btn2 = types.InlineKeyboardButton(text='Отменить', callback_data=f'accept-withdraw-no_{withdraw_id}')
+    keyboard.row(btn1, btn2)
     return keyboard
 
 
@@ -208,4 +217,4 @@ def spin_keyboard():
 
 def joe_message(balance, result, insurance):
     return f"{hbold('Ваш счёт: ')}{balance}$\n{hbold('Результат: ')}{result}$\n{hbold('Страховка: ')}{insurance}$\n" \
-           f"________________\nBar Bar Bar – {hbold('x5')}\n7️⃣ 7️⃣ 7️⃣ – {hbold('x3')}\n🍋🍋🍋  – {hbold('x2')}\n🍒🍒🍒 – {hbold('x2')}  \n"
+           f"________________\n{hbold('Bar Bar Bar')} – {hbold('x5')}\n7️⃣ 7️⃣ 7️⃣ – {hbold('x3')}\n🍋🍋🍋  – {hbold('x2')}\n🍒🍒🍒 – {hbold('x2')}  \n"

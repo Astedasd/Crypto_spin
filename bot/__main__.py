@@ -17,7 +17,9 @@ from aiogram.utils.markdown import bold, hbold
 
 # работа с БД
 from bot.db_service import get_user, register_user, update_username, get_referrals, update_balance
-from bot.db_service import set_referral, get_blocked_users, block_user, save_action, get_all_users
+from bot.db_service import set_referral, get_blocked_users, block_user, save_action, get_all_users, get_referrer
+# Работа со списком администраторов
+from bot.db_service import get_admins, delete_admin, insert_admin
 # Работа с уведомлениями
 from bot.db_service import create_notification, get_notifications, update_notifications_read, delete_notification
 # Работа с рассылками
@@ -26,35 +28,35 @@ from bot.db_service import create_mailing, update_mailing, delete_mailing, get_m
 from bot.db_service import create_promocode, get_promocode, get_all_promocodes, delete_promocode, get_last_promocode_id
 from bot.db_service import promocode_activated, activate_promocode
 # Работа с реф ссылками рекламных каналов
-from bot.db_service import create_ref_link, delete_ref_link, get_ref_links
+from bot.db_service import create_channel, delete_channel, get_channels, get_channel, update_channel
 # Работа с платежными системами
-from bot.db_service import get_waiting_deposits, update_deposit_status
+from bot.db_service import get_waiting_deposits, update_deposit_status, get_waiting_withdraws, get_withdraw
+from bot.db_service import update_withdraw, create_withdraw
 # Работа со статистикой
-from bot.db_service import prepare_daily_stat, get_platform_statistics
+from bot.db_service import prepare_daily_stat, get_platform_statistics, prepare_channels_stat
 
 # Клавиатуры
 from bot.keyboards import start_keyboard, cancel_keyboard, standard_keyboard, balance_keyboard
 from bot.keyboards import support_keyboard, games_keyboard, joe_keyboard, joe_message, stake_keyboard
-from bot.keyboards import admin_keyboard, promocodes_keyboard, ref_links_keyboard, statistics_keyboard
+from bot.keyboards import admin_keyboard, promocodes_keyboard, channels_keyboard, statistics_keyboard
 from bot.keyboards import deposit_method_keyboard, withdraw_method_keyboard, mailing_keyboard, mailing_inline_keyboard
-from bot.keyboards import mailing_media_keyboard
+from bot.keyboards import mailing_media_keyboard, withdraw_accept_keyboard
 
 # Шаблоны сообщений
 from bot.keyboards import user_stat_message, platform_stat_message
 
 # Уведомления
-from bot.notifications import start_notification, deposit_success_notification
+from bot.notifications import start_notification, deposit_success_notification, referral_deposit_notification
 
 # Список администраторов
 from bot.config import bot_name, admins, SPIN_TEXT, dollar, ROFL_VIDEO_ID
 
 from bot.joe_game import get_casino_values, is_winning_combo
 
-from bot.qiwi import create_qiwi_payment_link, check_qiwi_payment_status
+from bot.qiwi import create_qiwi_payment_link, check_qiwi_payment_status, pay_withdraw
 from bot.coinbase import create_coinbase_payment_link, check_coinbase_payment_status
 
-from bot.google_api import upload_statistics
-
+from bot.google_api import upload_statistics, upload_channels_statistics
 
 
 # Токен берётся из переменной окружения (можно задать через systemd unit)
@@ -76,6 +78,8 @@ bot = Bot(token=token)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 blocked_users = get_blocked_users()
+# admins = get_admins()
+
 
 # Временные переменные
 stakes = []
@@ -96,6 +100,7 @@ def schedule_jobs():
     scheduler.add_job(prepare_daily_statistics, "cron", hour='0', minute='0', timezone='utc')
     scheduler.add_job(prepare_ads_stats, "interval", seconds=3600)
     scheduler.add_job(send_mailings, "interval", seconds=60)
+    # scheduler.add_job(update_admins, "interval", seconds=3700)
 
 
 async def on_startup_notify(dp):
@@ -132,6 +137,7 @@ async def checking_deposits():
                 update_deposit_status(deposit=deposit, new_status="EXPIRED")
                 print(f"Просрочен платеж {deposit['deposit_id']} на сумму {deposit['amount']}")
             else:
+                deposit_status = "WAITING"
                 if deposit['deposit_type'] == "QIWI":
                     deposit_status = check_qiwi_payment_status(deposit)
                 elif deposit['deposit_type'] == "COINBASE":
@@ -140,13 +146,32 @@ async def checking_deposits():
                 if deposit_status == 'PAID':
                     # Обработка успешного платежа
                     update_deposit_status(deposit=deposit, new_status='PAID')
-                    update_balance(user_id=deposit['user_id'], delta_money=float(deposit['amount']), delta_insurance=float(deposit['amount'])*0.1)
+                    update_balance(user_id=deposit['user_id'],
+                                   delta_money=float(deposit['amount']),
+                                   delta_insurance=float(deposit['amount'])*0.1)
                     await send_balance_update(deposit['user_id'], deposit['amount'])
                     create_notification(user_id=deposit['user_id'],
                                         notification_text=deposit_success_notification(amount=deposit['amount']))
                     save_action(user_id=deposit['user_id'],
                                 action=f"DEPOSIT: Пользователь {deposit['user_id']} пополнил баланс на {deposit['amount']}",
                                 action_type="DEPOSIT")
+                    # отметка о пополнении у реферала
+                    referrer_id = get_referrer(user_id=deposit['user_id'])
+                    if referrer_id.startswith('r'):
+                        channel = get_channel(channel_code=referrer_id)
+                        channel['channel_deposits_num'] += 1
+                        channel['channel_deposits_sum'] += deposit['amount']
+                        update_channel(channel)
+                    else:
+                        update_balance(user_id=referrer_id, delta_money=deposit['amount']*0.1, delta_insurance=0.0)
+                        create_notification(user_id=referrer_id,
+                                            notification_text=referral_deposit_notification(user_name=get_user(deposit['user_id'])['user_name'],
+                                                                                            amount=deposit['amount']))
+                        save_action(user_id=deposit['user_id'],
+                                    action=f"REFERRAL: Баланс пользователя {referrer_id} пополнен на "
+                                           f"{deposit['amount']*0.1} за счет депозита реферала {deposit['user_id']}",
+                                    action_type="REFERRAL")
+
                     print(f"Оплачен счет {deposit['deposit_id']} на сумму {deposit['amount']}")
                 elif deposit_status in ('REJECTED',  'EXPIRED', 'CANCELED'):
                     update_deposit_status(deposit=deposit, new_status=deposit_status)
@@ -164,10 +189,26 @@ async def prepare_daily_statistics():
     # Закинуть все в гугл таблицу
     print("Готовлю ежедневную статистику")
     upload_statistics(stats=stats)
-    pass
 
 
 async def prepare_ads_stats():
+    channels = prepare_channels_stat()
+    upload_channels_statistics(channels=channels)
+
+
+async def update_admins():
+    """
+
+    :return:
+    """
+    """
+    global admins
+    storage_admins = get_admins()
+    for admin in admins:
+        if admin not in storage_admins:
+            insert_admin(admin)
+    for admin 
+    """
     pass
 
 
@@ -203,8 +244,8 @@ async def send_mailings():
                 time_format = '%Y-%m-%d %H:%M'
                 mailing_date = datetime.strptime(mailing['mailing_date'], time_format)
                 if mailing_date < datetime.utcnow():
-                    users = get_all_users()
-                    # users = (get_user(330639572),)
+                    users = get_all_users()  # Рассылка по всем пользователям
+                    # users = (get_user(330639572), get_user(333583210))  # Рассылка по заданному списку пользователей
                     for user in users:
                         if mailing['mailing_file_type'] == 'video':
                             await dp.bot.send_video(chat_id=user['user_id'], video=mailing['mailing_file_id'])
@@ -230,7 +271,8 @@ class States(StatesGroup):
     admin_blocking = State()  # Администратор вводит id пользователя для блока
     creating_promocode_name = State()  # Администратор вводит название нового промокода
     creating_promocode_sum = State()  # Администратор вводит сумму нового промокода
-    creating_ref_link = State()
+    entering_channel_name = State()  # Админ вводит название рекламного канала
+    entering_channel_code = State()  # Админ вводит ссылку для рекламного канала
     entering_deposit = State()  # пользователь вводит сумму для пополнения баланса
     entering_withdraw = State()  # пользователь вводит сумму для вывода баланса
     entering_username = State()
@@ -238,6 +280,7 @@ class States(StatesGroup):
     entering_mailing_text = State()  # Админ вводит текст рассылки
     sending_mailing_file = State()  # Админ присылает файл для рассылки
     entering_mailing_date = State()  # Админ вводит дату рассылки
+    entering_withdraw_info = State()  # Пользователь вводит номер карты или криптокошелька
 
 
 @dp.message_handler(user_id=blocked_users)
@@ -257,18 +300,19 @@ async def cmd_start(message: types.Message, state: FSMContext):
     # обработка реферальной ссылки
     referrer = None
     if " " in message.text:
-        referrer_id = message.text.split()[1]
+        referrer_id = str(message.text.split()[1])
         # Пробуем преобразовать строку в число
-        try:
+        if referrer_id.isdigit():
             referrer_id = int(referrer_id)
             if message.from_user['id'] != referrer_id and get_user(referrer_id):
                 referrer = referrer_id
-        except ValueError:
-            pass
+        elif referrer_id.startswith('r') and get_channel(channel_code=referrer_id):
+            referrer = referrer_id
+
     # Проверка регистрации
     if register_user(message.from_user['id'], message.from_user['username']):
         if referrer:
-            set_referral(referrer, message.from_user['id'])
+            set_referral(str(referrer), message.from_user['id'])
         await message.answer(text1, reply_markup=keyboard_1)
         await message.answer(text2, reply_markup=keyboard_2)
 
@@ -300,11 +344,13 @@ async def ready_to_start(call: types.CallbackQuery):
     await call.answer()
 
 
+"""
 @dp.message_handler(content_types=[types.ContentType.VIDEO])
 async def download_doc(message: types.Message):
     document = message.video
     print(document)
     await message.answer("Файл получен")
+"""
 
 
 # Обработка команды отмена в админ панели
@@ -313,7 +359,12 @@ async def download_doc(message: types.Message):
 @dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.administrating)
 @dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.creating_promocode_name)
 @dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.creating_promocode_sum)
-@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.creating_ref_link)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.entering_channel_name)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.entering_channel_code)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.entering_date)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.entering_mailing_text)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.sending_mailing_file)
+@dp.message_handler(Text(equals='отмена', ignore_case=True), state=States.entering_mailing_date)
 async def cancel_handler(message: types.Message, state: FSMContext):
     await States.administrating.set()
     await message.answer('Отменено', reply_markup=admin_keyboard())
@@ -511,14 +562,16 @@ async def exit_to_main_menu(message: types.Message, state: FSMContext):
 @dp.message_handler(text='Баланс')
 async def cmd_balance(message: types.Message, state: FSMContext):
     user = get_user(message.from_user['id'])
-    await message.answer(f"Ваш баланс составляет: {user['balance']}", reply_markup=balance_keyboard())
+    await message.answer(f"Ваш баланс составляет: {user['balance']}\nСтраховка: {user['insurance']}",
+                         reply_markup=balance_keyboard())
 
 
 # Обработка команды Пополнить
 @dp.callback_query_handler(Text(equals="deposit"))
 async def cmd_deposit(call: types.CallbackQuery):
     await States.entering_deposit.set()
-    await call.message.answer("Введите сумму пополнения ($)", reply_markup=cancel_keyboard())
+    await call.message.answer("Введите сумму пополнения ($). Минимальная сумма пополнения 1$",
+                              reply_markup=cancel_keyboard())
     await call.answer()
 
 
@@ -527,7 +580,9 @@ async def cmd_deposit(call: types.CallbackQuery):
 async def cmd_deposit_create(message: types.Message, state: FSMContext):
     try:
         amount = float(message.text)
-        if amount > 0:
+        if 0 < amount < 1.0:
+            await message.answer("Минимальная сумма пополнения 1$", reply_markup=cancel_keyboard())
+        elif amount >= 1.0:
             await state.finish()
             await message.answer(f"Выберете метод оплаты:", reply_markup=deposit_method_keyboard(message.from_user['id'], message.text))
         else:
@@ -569,43 +624,71 @@ async def cmd_withdraw(call: types.CallbackQuery):
 
 # Обработка считывания суммы вывода
 @dp.message_handler(state=States.entering_withdraw)
-async def cmd_deposit_create(message: types.Message, state: FSMContext):
+async def cmd_withdraw_create(message: types.Message, state: FSMContext):
     try:
         amount = float(message.text)
-        if amount > 0:
+        user = get_user(message.from_user['id'])
+        if 0 < amount < 1.0:
+            await message.answer(f"Минимальная сумма вывода 1$", reply_markup=cancel_keyboard())
+        elif 1.0 <= amount <= user['balance']:
             await state.finish()
-            await message.answer(f"Выберете метод оплаты:", reply_markup=withdraw_method_keyboard(message.from_user['id'], message.text))
+            await message.answer(f"Выберете способ вывода:",
+                                 reply_markup=withdraw_method_keyboard(message.from_user['id'], message.text))
         else:
-            await message.answer("Сумма вывода введена неверно, введите число еще раз",
+            await message.answer("Сумма вывода введена неверно или превышает текущий баланс, введите число еще раз",
                                  reply_markup=cancel_keyboard())
     except Exception as e:
         await message.answer("Сумма вывода введена неверно, введите число еще раз", reply_markup=cancel_keyboard())
 
 
 # Фиксируем запрос вывода
-@dp.callback_query_handler(Text(startswith="deposit_"))
-async def cmd_payment_link(call: types.CallbackQuery):
+@dp.callback_query_handler(Text(startswith="withdraw_"))
+async def cmd_withdraw_type(call: types.CallbackQuery, state: FSMContext):
     await call.message.delete()
     user_id = call.data.split('_')[1]
     payment_type = call.data.split('_')[2]
     amount = call.data.split('_')[3]
-    """
-    if payment_type == 'qiwi':
-        link = create_qiwi_payment_link(user_id=user_id, amount=amount)
-    elif payment_type == 'crypto':
-        link = create_coinbase_payment_link(user_id=user_id, amount=amount)
+    withdraw_id = create_withdraw(user_id=user_id, amount=amount, withdraw_type=payment_type)
+    await state.update_data(withdraw_id=withdraw_id)
+    await state.update_data(withdraw_type=payment_type)
+    if payment_type == 'card':
+        await call.message.answer(f"Введите номер карты для перевода", reply_markup=cancel_keyboard())
     else:
-        print("Какая-то ошибка с созданием платежа")
-        return
-    keyboard = types.InlineKeyboardMarkup()
-    keyboard.add(types.InlineKeyboardButton("Оплатить счет", url=link))
-    await call.message.answer(f"Создан счет на сумму ${amount}",
-                              reply_markup=standard_keyboard(user_id))
-    await call.message.answer(f"Оплатить можно по ссылке:", reply_markup=keyboard)
-    """
-    await call.message.answer(f"Ваш запрос на вывод сформирован. Запрос обрабатывается модератором в течение 24 часов.",
-                              reply_markup=standard_keyboard(user_id))
+        await call.message.answer(f"Введите номер Bitcoin кошелька для перевода", reply_markup=cancel_keyboard())
+    await States.entering_withdraw_info.set()
     await call.answer()
+
+
+# Получаем номер карты для вывода
+@dp.message_handler(state=States.entering_withdraw_info)
+async def cmd_withdraw_info(message: types.Message, state: FSMContext):
+    fsm_data = await state.get_data()
+    withdraw_id = fsm_data.get("withdraw_id")
+    withdraw_type = fsm_data.get("withdraw_type")
+    if withdraw_type == 'card':
+        if len(str(message.text)) == 16 and str(message.text).isdigit():
+            if str(message.text).startswith('2'):
+                await message.answer("Банковские карты системы Мир не поддерживаются, введите другую карту",
+                                     reply_markup=cancel_keyboard())
+                return
+            elif str(message.text).startswith('4') or str(message.text).startswith('5'):
+                # Все хорошо
+                pass
+            else:
+                await message.answer("Банковские карты данной платежной системы не поддерживаются, введите другую карту",
+                                     reply_markup=cancel_keyboard())
+                return
+        else:
+            await message.answer("Номер карты введен неверно, попробуйте ещё раз", reply_markup=cancel_keyboard())
+            return
+
+    withdraw = get_withdraw(withdraw_id)
+    print(withdraw['withdraw_info'])
+    withdraw['withdraw_info'] = str(message.text)
+    update_withdraw(withdraw)
+    await state.finish()
+    await message.answer(f"Ваш запрос на вывод сформирован и будет обработан администратором в течение 24 часов",
+                         reply_markup=standard_keyboard(user_id=message.from_user['id']))
 
 
 # Получаем список рефералов пользователя
@@ -651,6 +734,12 @@ async def checking_promocode(message: types.Message, state: FSMContext):
                                f"{message.text} на {promocode['promocode_sum']}$", action_type="PROMOCODE")
             create_notification(user_id=message.from_user['id'],
                                 notification_text=f"Вы успешно активировали промокод {message.text} на {promocode['promocode_sum']}$")
+            referrer = get_referrer(user_id=message.from_user['id'])
+            if referrer.startswith('r'):
+                channel = get_channel(referrer)
+                channel['channel_promocode_num'] += 1
+                channel['channel_promocode_sum'] += promocode['promocode_sum']
+                update_channel(channel=channel)
             await message.answer(f"Отлично, вы получили {promocode['promocode_sum']}$",
                                  reply_markup=standard_keyboard(message.from_user['id']))
         else:
@@ -660,6 +749,7 @@ async def checking_promocode(message: types.Message, state: FSMContext):
         await message.answer("Такой промокод не существует.\nВведите действительный промокод",
                              reply_markup=cancel_keyboard())
 ########################################################################################################################
+
 
 ########################################################################################################################
 # Обработка команды Уведомления
@@ -741,7 +831,52 @@ async def cancel_handler(message: types.Message, state: FSMContext):
 @dp.message_handler(text='Выводы', state=States.administrating)
 async def admin_withdraws(message: types.Message, state: FSMContext):
     await message.answer("Выводы:", reply_markup=admin_keyboard())
-    await message.answer("Нет активных выводов:", reply_markup=admin_keyboard())
+    withdraws = get_waiting_withdraws()
+    if withdraws:
+        for withdraw in withdraws:
+            await message.answer(f"Вывод от пользователя {withdraw['user_id']} от {withdraw['date']}\n"
+                                 f"на сумму {withdraw['amount']}$ через {withdraw['withdraw_type']} "
+                                 f"по номеру {withdraw['withdraw_info']}",
+                                 reply_markup=withdraw_accept_keyboard(withdraw_id=withdraw['withdraw_id']))
+    else:
+        await message.answer("Нет активных выводов:", reply_markup=admin_keyboard())
+
+
+# Обработка подтверждения Вывода
+@dp.callback_query_handler(Text(startswith="accept-withdraw-yes"), state=States.administrating)
+async def yes_delete_notification(call: types.CallbackQuery):
+    withdraw = get_withdraw(withdraw_id=call.data.split('_')[1])
+    user = get_user(withdraw['user_id'])
+    if user['balance'] >= withdraw['amount']:
+        update_balance(withdraw['user_id'], delta_money=-withdraw['amount'], delta_insurance=0.0)
+        withdraw['status'] = 'PAID'
+        update_withdraw(withdraw)
+        await call.message.answer(text=f"Вывод отправлен на обработку", reply_markup=admin_keyboard())
+        # if withdraw['withdraw_type'] == 'card':
+            # pay_withdraw(withdraw)  # Произвести вывод средств на банковскую карту
+        create_notification(user_id=withdraw['user_id'],
+                            notification_text=f"Ваш вывод от {withdraw['date']} на сумму {withdraw['amount']} "
+                                              f"одобрен администрацией и отправлен на обработку")
+    await call.message.delete()
+    await call.answer()
+
+
+# Обработка удаления Вывода
+@dp.callback_query_handler(Text(startswith="accept-withdraw-no"), state=States.administrating)
+async def yes_delete_notification(call: types.CallbackQuery):
+    withdraw = get_withdraw(withdraw_id=call.data.split('_')[1])
+    withdraw['status'] = 'CANCELED'
+    update_withdraw(withdraw)
+    save_action(user_id=withdraw['user_id'], action=f"CANCEL WITHDRAW: {withdraw['withdraw_id']}",
+                action_type='CANCEL WITHDRAW')
+    create_notification(user_id=withdraw['user_id'],
+                        notification_text=f"Ваш вывод от {withdraw['date']} на сумму {withdraw['amount']} "
+                                          f"отменен администратором")
+    await bot.send_message(withdraw['user_id'], f"Ваш вывод от {withdraw['date']} на сумму {withdraw['amount']} "
+                                                f"отменен администратором")
+    await call.message.answer(text="Вывод отменен", reply_markup=admin_keyboard())
+    await call.message.delete()
+    await call.answer()
 ########################################################################################################################
 
 
@@ -837,68 +972,87 @@ async def yes_delete_promocode(call: types.CallbackQuery):
 ########################################################################################################################
 # Обработка команды админ Реф. ссылки
 @dp.message_handler(text='Реф. ссылки', state=States.administrating)
-async def admin_ref_links(message: types.Message, state: FSMContext):
-    await message.answer("Меню реферальных ссылок", reply_markup=ref_links_keyboard())
+async def admin_channels(message: types.Message, state: FSMContext):
+    await message.answer("Меню реферальных ссылок", reply_markup=channels_keyboard())
 
 
 # Обработка команды админ Создать реф. ссылку, ввод названия рекламного канала
 @dp.message_handler(text='Создать реф. ссылку', state=States.administrating)
-async def admin_ref_links_create(message: types.Message, state: FSMContext):
-    await States.creating_ref_link.set()
+async def admin_channels_create(message: types.Message, state: FSMContext):
+    await States.entering_channel_name.set()
     await message.answer("Введите название рекламного канала", reply_markup=cancel_keyboard())
 
 
 # Обработка команды админ Создать реф. ссылку, успешно
-@dp.message_handler(state=States.creating_ref_link)
-async def admin_ref_links_create_successful(message: types.Message, state: FSMContext):
-    ref_link_name = str(message.text)
-    create_ref_link(ref_link_name=ref_link_name)
-    await States.administrating.set()
-    await message.answer(f"Реферальная ссылка для рекламного канала: {ref_link_name}:"
-                         f"\nhttps://t.me/{bot_name}?start={ref_link_name}", reply_markup=ref_links_keyboard())
+@dp.message_handler(state=States.entering_channel_name)
+async def admin_channels_enter_name(message: types.Message, state: FSMContext):
+    await state.update_data(channel_name=str(message.text))
+    await States.entering_channel_code.set()
+    await message.answer(f"Введите код для ссылки рекламного канала {str(message.text)}, "
+                         f"начиная с буквы r (например rTest):",
+                         reply_markup=channels_keyboard())
+
+
+# Обработка команды админ Создать реф. ссылку, успешно
+@dp.message_handler(state=States.entering_channel_code)
+async def admin_channels_enter_code(message: types.Message, state: FSMContext):
+    channel_code = str(message.text)
+    if channel_code.startswith("r"):
+        fsm_data = await state.get_data()
+        new_channel_name = fsm_data.get("channel_name")
+        create_channel(channel_name=new_channel_name, channel_code=channel_code)
+        await States.administrating.set()
+        await message.answer(f"Реферальная ссылка для рекламного канала: {new_channel_name}:"
+                             f"\nhttps://t.me/{bot_name}?start={channel_code}", reply_markup=channels_keyboard())
+    else:
+        await message.answer(f"Код для ссылки должен начинаться с буквы r, попробуйте еще раз",
+                             reply_markup=channels_keyboard())
 
 
 # Обработка команды админ Созданные реф ссылки
 @dp.message_handler(text='Созданные реф. ссылки', state=States.administrating)
-async def admin_ref_links_all(message: types.Message, state: FSMContext):
-    ref_links = get_ref_links()
-    if ref_links:
-        await message.answer("Созданные реф. ссылки:", reply_markup=ref_links_keyboard())
-        for ref_link in ref_links:
+async def admin_channels_all(message: types.Message, state: FSMContext):
+    channels = get_channels()
+    if channels:
+        await message.answer("Созданные реф. ссылки:", reply_markup=channels_keyboard())
+        for channel in channels:
             keyboard = types.InlineKeyboardMarkup(resize_keyboard=True, row_width=1)
-            keyboard.add(types.InlineKeyboardButton(text='Удалить', callback_data=f"ref_link_delete_{ref_link['ref_link_id']}"))
-            text = f"{ref_link['ref_link_name']}: {ref_link['ref_link_stats']} переходов\nСсылка: {ref_link['ref_link_link']}"
+            keyboard.add(types.InlineKeyboardButton(text='Удалить',
+                                                    callback_data=f"channel-delete_{channel['channel_id']}"))
+            text = f"{channel['channel_name']}, регистраций: {channel['channel_registrations']}" \
+                   f"\nСсылка: https://t.me/{bot_name}?start={channel['channel_code']}"
             await message.answer(text, reply_markup=keyboard)
     else:
-        await message.answer("Нет активных реферальных ссылок", reply_markup=ref_links_keyboard())
+        await message.answer("Нет активных реферальных ссылок", reply_markup=channels_keyboard())
 
 
 # Обработка удаления Реф ссылки
-@dp.callback_query_handler(Text(startswith="ref_link_delete"), state=States.administrating)
-async def delete_ref_links(call: types.CallbackQuery):
-    ref_link_id = call.data.split('_')[3]
+@dp.callback_query_handler(Text(startswith="channel-delete"), state=States.administrating)
+async def delete_channels(call: types.CallbackQuery):
+    channel_id = call.data.split('_')[1]
     keyboard = types.InlineKeyboardMarkup(resize_keyboard=True, row_width=2)
-    keyboard.add(types.InlineKeyboardButton(text='Да', callback_data=f"yes_ref_link_delete_{ref_link_id}"),
-                 types.InlineKeyboardButton(text='Нет', callback_data=f"no_ref_link_delete_{ref_link_id}"))
+    keyboard.add(types.InlineKeyboardButton(text='Да', callback_data=f"yes-channel-delete_{channel_id}"),
+                 types.InlineKeyboardButton(text='Нет', callback_data=f"no-channel-delete_{channel_id}"))
     await call.message.edit_reply_markup(keyboard)
     await call.answer()
 
 
 # Обработка отмены удаления реф ссылки
-@dp.callback_query_handler(Text(startswith="no_ref_link_delete"), state=States.administrating)
-async def no_delete_ref_link(call: types.CallbackQuery):
-    ref_link_id = call.data.split('_')[4]
+@dp.callback_query_handler(Text(startswith="no-channel-delete"), state=States.administrating)
+async def no_delete_channels(call: types.CallbackQuery):
+    channel_id = call.data.split('_')[1]
     keyboard = types.InlineKeyboardMarkup(resize_keyboard=True, row_width=1)
-    keyboard.add(types.InlineKeyboardButton(text='Удалить', callback_data=f"ref_link_delete_{ref_link_id}"))
+    keyboard.add(types.InlineKeyboardButton(text='Удалить', callback_data=f"channel-delete_{channel_id}"))
     await call.message.edit_reply_markup(keyboard)
     await call.answer()
 
 
 # Обработка подтверждения удаления реф ссылки
-@dp.callback_query_handler(Text(startswith="yes_ref_link_delete"), state=States.administrating)
-async def yes_delete_ref_link(call: types.CallbackQuery):
-    delete_ref_link(ref_link_id=call.data.split('_')[4])
+@dp.callback_query_handler(Text(startswith="yes-channel-delete"), state=States.administrating)
+async def yes_delete_channels(call: types.CallbackQuery):
+    delete_channel(channel_id=call.data.split('_')[1])
     await call.message.delete()
+    await call.message.answer("Удалена реферальная ссылка", reply_markup=channels_keyboard())
     await call.answer()
 ########################################################################################################################
 
@@ -928,12 +1082,11 @@ async def admin_mailings_text(message: types.Message, state: FSMContext):
 
 
 # Обработка загрузки файла для рассылки
-# @dp.message_handler(content_types=[types.ContentType.VIDEO], state=States.sending_mailing_file)
-# @dp.message_handler(content_types=[types.ContentType.ANIMATION], state=States.sending_mailing_file)
-# @dp.message_handler(content_types=[types.ContentType.PHOTO], state=States.sending_mailing_file)
+@dp.message_handler(content_types=[types.ContentType.VIDEO], state=States.sending_mailing_file)
+@dp.message_handler(content_types=[types.ContentType.ANIMATION], state=States.sending_mailing_file)
+@dp.message_handler(content_types=[types.ContentType.PHOTO], state=States.sending_mailing_file)
 @dp.message_handler(state=States.sending_mailing_file)
 async def admin_mailings_file(message: types.Message, state: FSMContext):
-    await States.administrating.set()
     fsm_data = await state.get_data()
     mailing_text = fsm_data.get('mailing_text')
     if message.text != "Нет медиафайлов":
@@ -965,6 +1118,7 @@ async def admin_mailings_file(message: types.Message, state: FSMContext):
         "mailing_file_type": mailing_file_type,
         "mailing_status": "WAITING"
     }
+    await States.administrating.set()
     create_mailing(mailing)
     await message.answer(f"{mailing['mailing_text']}", reply_markup=mailing_keyboard())
     await message.answer(f"Создана рассылка {mailing['mailing_id']}. Все верно?",
@@ -1118,7 +1272,8 @@ async def admin_stat_user_1(message: types.Message, state: FSMContext):
     users = get_all_users()
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     for user in users:
-        keyboard.add(types.InlineKeyboardButton(text=f'Пользователь {user[0]}', callback_data=f'stat_{user[0]}'))
+        keyboard.add(types.InlineKeyboardButton(text=f"{user['user_name']}: {user['balance']}$",
+                                                callback_data=f"stat_{user['user_id']}"))
     await message.answer("Все пользователи:", reply_markup=keyboard)
 
 
@@ -1126,7 +1281,6 @@ async def admin_stat_user_1(message: types.Message, state: FSMContext):
 @dp.callback_query_handler(Text(startswith="stat_"), state=States.administrating)
 async def admin_stat_user_2(call: types.CallbackQuery, state: FSMContext):
     user = get_user(int(call.data.split("_")[1]))
-
     if user:
         await call.message.answer(user_stat_message(user=user), reply_markup=admin_keyboard())
     else:
@@ -1150,4 +1304,5 @@ async def error_bot_blocked(update: types.Update, exception: BotBlocked):
 
 if __name__ == "__main__":
     scheduler.start()
+
     executor.start_polling(dp, skip_updates=False, on_startup=on_startup)

@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime, timedelta
 from bot.config import bot_name
+import random
 
 
 # Подключение к БД
@@ -80,10 +81,24 @@ def get_user(user):
 
 
 def get_all_users():
-    users = []
     con, cur = connect_db()
-    cur.execute(f"""SELECT user_id, user_name FROM users""")
-    users = cur.fetchall()
+    cur.execute(f"""SELECT * FROM users""")
+    data = cur.fetchall()
+    users = []
+    if data:
+        for user in data:
+            users.append({
+                "user_id": user[0],
+                "user_name": user[1],
+                "balance": round(user[2], 2),
+                "insurance": round(user[3], 2),
+                "registration_date": user[4],
+                "deposit_total": round(user[5], 2),
+                "withdraw_total": round(user[6], 2),
+                "referral_code": user[7],
+                "referrals": user[8],
+                "referral_bonus": round(user[9], 2),
+            })
     return users
 
 
@@ -101,11 +116,30 @@ def get_referrals(user_id):
         return False
 
 
-def set_referral(user_id, referral_id):
+def get_referrer(user_id):
+    con, cur = connect_db()
+    cur.execute(f"""SELECT user_id FROM referrals WHERE referral_id = '%s'""" % user_id)
+    referrer = cur.fetchone()[0]
+    con.close()
+    return referrer
+
+
+def set_referral(user_id: str, referral_id: int):
+    """
+
+    :param user_id: str
+    :param referral_id: int
+    :return:
+    """
     con, cur = connect_db()
     data = (user_id, referral_id)
     cur.execute(f"""INSERT INTO referrals (user_id, referral_id) VALUES (?,?)""", data)
     con.commit()
+    if user_id.startswith('r'):
+        cur.execute(f"""UPDATE channels SET channel_visitors = channel_visitors + 1,
+                        channel_registrations = channel_registrations + 1 WHERE channel_code = '%s'""" % user_id)
+    else:
+        cur.execute(f"""UPDATE users SET referrals = referrals + 1 WHERE user_id = '%s'""" % user_id)
     con.close()
 
 
@@ -337,45 +371,104 @@ def get_mailings_to_send():
     return mailings
 
 
-def create_ref_link(ref_link_name):
+def create_channel(channel_name: str, channel_code: str):
     con, cur = connect_db()
-    cur.execute(f"""SELECT max(ref_link_id) FROM ref_links""")
-    ref_link_id = cur.fetchone()[0]
-    if ref_link_id:
-        ref_link_id = int(ref_link_id) + 1
+    cur.execute(f"""SELECT max(channel_id) FROM channels""")
+    channel_id = cur.fetchone()[0]
+    if channel_id:
+        channel_id = int(channel_id) + 1
     else:
-        ref_link_id = 1
-    ref_link_link = f"https://t.me/{bot_name}?start={ref_link_name}"
-    data = (ref_link_id, ref_link_name, ref_link_link, 0)
-    cur.execute(f"""INSERT INTO ref_links (ref_link_id, ref_link_name, ref_link_link, ref_link_stats) VALUES (?,?,?,?)""", data)
+        channel_id = 1
+    data = (channel_id, channel_name, channel_code)
+    cur.execute(f"""INSERT INTO channels (channel_id, channel_name, channel_code) VALUES (?,?,?)""", data)
     con.commit()
     con.close()
 
 
-def delete_ref_link(ref_link_id):
+def delete_channel(channel_id):
     con, cur = connect_db()
-    cur.execute(f"""DELETE FROM ref_links WHERE ref_link_id = '%s'""" % ref_link_id)
+    cur.execute(f"""UPDATE channels SET is_deleted = TRUE WHERE channel_id = '%s'""" % channel_id)
     con.commit()
     con.close()
 
 
-def get_ref_links():
+def get_channel(channel_code):
     con, cur = connect_db()
-    cur.execute(f"""SELECT ref_link_id, ref_link_name, ref_link_link, ref_link_stats FROM ref_links""")
-    data = cur.fetchall()
+    cur.execute(f"""SELECT * FROM channels WHERE channel_code = '%s'""" % channel_code)
+    data = cur.fetchone()
     con.close()
     if data:
-        ref_links = []
-        for line in data:
-            ref_links.append({
-                'ref_link_id': line[0],
-                'ref_link_name': line[1],
-                'ref_link_link': line[2],
-                'ref_link_stats': line[3]
-                                  })
-        return ref_links
+        channel = ({
+            "channel_name": data[1],
+            "channel_code": data[2],
+            "channel_visitors": data[3],
+            "channel_registrations": data[4],
+            "channel_promocode_num": data[5],
+            "channel_promocode_sum": data[6],
+            "channel_deposits_num": data[7],
+            "channel_deposits_sum": data[8],
+            "channel_withdraws_num": data[9],
+            "channel_withdraws_sum": data[10],
+        })
+        return channel
     else:
         return False
+
+
+def update_channel(channel):
+    con, cur = connect_db()
+    cur.execute(f"""UPDATE channels SET channel_name = '%s', channel_visitors = '%s',
+                channel_registrations = '%s', channel_promocode_num = '%s', channel_promocode_sum = '%s',
+                channel_deposits_num = '%s', channel_deposits_sum = '%s', channel_withdraws_num = '%s',
+                channel_withdraws_sum = '%s'
+                WHERE channel_code = '%s'""" % (channel['channel_name'], channel['channel_visitors'],
+                                                channel['channel_registrations'], channel['channel_promocode_num'],
+                                                channel['channel_promocode_sum'], channel['channel_deposits_num'],
+                                                channel['channel_deposits_sum'], channel['channel_withdraws_num'],
+                                                channel['channel_withdraws_sum'], channel['channel_code']))
+    con.commit()
+    con.close()
+
+
+def get_channels():
+    con, cur = connect_db()
+    cur.execute(f"""SELECT * FROM channels WHERE is_deleted = FALSE""")
+    data = cur.fetchall()
+    con.close()
+    channels = []
+    if data:
+        for line in data:
+            channels.append({
+                'channel_id': line[0],
+                'channel_name': line[1],
+                'channel_code': line[2],
+                'channel_registrations': line[4]
+                                  })
+        return channels
+    else:
+        return False
+
+
+def prepare_channels_stat():
+    con, cur = connect_db()
+    cur.execute(f"""SELECT * FROM channels""")
+    data = cur.fetchall()
+    con.close()
+    channels = []
+    for channel in data:
+        channels.append({
+            "channel_name": channel[1],
+            "channel_code": channel[2],
+            "channel_visitors": channel[3],
+            "channel_registrations": channel[4],
+            "channel_promocode_num": channel[5],
+            "channel_promocode_sum": channel[6],
+            "channel_deposits_num": channel[7],
+            "channel_deposits_sum": channel[8],
+            "channel_withdraws_num": channel[9],
+            "channel_withdraws_sum": channel[10],
+        })
+    return channels
 
 
 def get_blocked_users():
@@ -458,6 +551,70 @@ def get_waiting_deposits():
         return payments
     else:
         return None
+
+
+def create_withdraw(user_id, amount, withdraw_type):
+    sep = '000'
+    id_form = (str(user_id), str(random.randint(0, 100000)))
+    withdraw_id = sep.join(id_form)
+    date = datetime.utcnow()
+    data = (withdraw_id, user_id, amount, withdraw_type, "WAITING", date, "None")
+    con, cur = connect_db()
+    cur.execute("""INSERT INTO withdraws (withdraw_id, user_id, amount, withdraw_type, status, date, withdraw_info) VALUES (?,?,?,?,?,?,?)""", data)
+    con.commit()
+    con.close()
+    return withdraw_id
+
+
+def get_withdraw(withdraw_id):
+    con, cur = connect_db()
+    cur.execute("""SELECT * FROM withdraws WHERE withdraw_id = '%s'""" % withdraw_id)
+    data = cur.fetchone()
+    if data:
+        withdraw = {
+            'withdraw_id': data[0],
+            'user_id': data[1],
+            'amount': data[2],
+            'withdraw_type': data[3],
+            'status': data[4],
+            'date': data[5],
+            'withdraw_info': data[6]
+        }
+        return withdraw
+    else:
+        return False
+
+
+def get_waiting_withdraws():
+    con, cur = connect_db()
+    cur.execute("""SELECT * FROM withdraws WHERE status =  'WAITING'""")
+    data = cur.fetchall()
+    withdraws = []
+    if data:
+        for withdraw in data:
+            withdraws.append({
+                'withdraw_id': withdraw[0],
+                'user_id': withdraw[1],
+                'amount': withdraw[2],
+                'withdraw_type': withdraw[3],
+                'status': withdraw[4],
+                'date': withdraw[5],
+                'withdraw_info': withdraw[6]
+            })
+        return withdraws
+    else:
+        return False
+
+
+def update_withdraw(withdraw):
+    con, cur = connect_db()
+    cur.execute("""UPDATE withdraws SET user_id='%s', amount='%s', withdraw_type='%s', status='%s', date='%s',
+                withdraw_info='%s' WHERE withdraw_id = '%s'""" % (withdraw['user_id'], withdraw['amount'],
+                                                                  withdraw['withdraw_type'], withdraw['status'],
+                                                                  withdraw['date'], withdraw['withdraw_info'],
+                                                                  withdraw['withdraw_id'],))
+    con.commit()
+    con.close()
 
 
 def prepare_daily_stat():
@@ -566,6 +723,29 @@ def get_platform_statistics(date: str):
         return False
 
 
-date = str(datetime.utcnow()-timedelta(days=1))[:10]
-stats = get_platform_statistics(date)
+def get_admins():
+    con, cur = connect_db()
+    cur.execute(
+        """SELECT * FROM admins""")
+    data = cur.fetchall()
+    admins = []
+    if data:
+        for admin in data:
+            admins.append({
+                "user_id": admin[0],
+                "user_name": admin[1]
+            })
+    return admins
+
+
+def delete_admin(user_id: int):
+    pass
+
+
+def insert_admin(user_id: int, user_name: str):
+    pass
+
+
+# date = str(datetime.utcnow()-timedelta(days=1))[:10]
+# stats = get_platform_statistics(date)
 # print(stats)
