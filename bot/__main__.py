@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from os import getenv
 from sys import exit
 import re
+import os
+import time
+import pytz
 
 from aiogram import Bot, Dispatcher, types, md
 from aiogram.utils import executor
@@ -15,54 +18,62 @@ from aiogram.utils.exceptions import BotBlocked
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.utils.markdown import bold, hbold
 
+
 # работа с БД
-from bot.db_service import get_user, register_user, update_username, get_referrals, update_balance
-from bot.db_service import set_referral, get_blocked_users, block_user, save_action, get_all_users, get_referrer
+from db_service import get_user, register_user, update_username, get_referrals, update_balance
+from db_service import set_referral, get_blocked_users, block_user, save_action, get_all_users, get_referrer
+# Работа с константами платформы
+from db_service import get_constants
 # Работа со списком администраторов
-from bot.db_service import get_admins, delete_admin, insert_admin
+from db_service import get_admins, delete_admin, insert_admin
 # Работа с уведомлениями
-from bot.db_service import create_notification, get_notifications, update_notifications_read, delete_notification
+from db_service import create_notification, get_notifications, update_notifications_read, delete_notification
 # Работа с рассылками
-from bot.db_service import create_mailing, update_mailing, delete_mailing, get_mailings_to_send, get_mailing, get_last_mailing_id
+from db_service import create_mailing, update_mailing, delete_mailing, get_mailings_to_send, get_mailing, get_last_mailing_id
 # Работа с промокодами
-from bot.db_service import create_promocode, get_promocode, get_all_promocodes, delete_promocode, get_last_promocode_id
-from bot.db_service import promocode_activated, activate_promocode
+from db_service import create_promocode, get_promocode, get_all_promocodes, delete_promocode, get_last_promocode_id
+from db_service import promocode_activated, activate_promocode
 # Работа с реф ссылками рекламных каналов
-from bot.db_service import create_channel, delete_channel, get_channels, get_channel, update_channel
+from db_service import create_channel, delete_channel, get_channels, get_channel, update_channel
 # Работа с платежными системами
-from bot.db_service import get_waiting_deposits, update_deposit_status, get_waiting_withdraws, get_withdraw
-from bot.db_service import update_withdraw, create_withdraw
+from db_service import get_waiting_deposits, update_deposit_status, get_waiting_withdraws, get_withdraw
+from db_service import update_withdraw, create_withdraw
 # Работа со статистикой
-from bot.db_service import prepare_daily_stat, get_platform_statistics, prepare_channels_stat
+from db_service import prepare_daily_stat, get_platform_statistics, prepare_channels_stat
 
 # Клавиатуры
-from bot.keyboards import start_keyboard, cancel_keyboard, standard_keyboard, balance_keyboard
-from bot.keyboards import support_keyboard, games_keyboard, joe_keyboard, joe_message, stake_keyboard
-from bot.keyboards import admin_keyboard, promocodes_keyboard, channels_keyboard, statistics_keyboard
-from bot.keyboards import deposit_method_keyboard, withdraw_method_keyboard, mailing_keyboard, mailing_inline_keyboard
-from bot.keyboards import mailing_media_keyboard, withdraw_accept_keyboard
+from keyboards import start_keyboard, cancel_keyboard, standard_keyboard, balance_keyboard
+from keyboards import support_keyboard, games_keyboard, joe_keyboard, joe_message, stake_keyboard
+from keyboards import admin_keyboard, promocodes_keyboard, channels_keyboard, statistics_keyboard
+from keyboards import deposit_method_keyboard, withdraw_method_keyboard, mailing_keyboard, mailing_inline_keyboard
+from keyboards import mailing_media_keyboard, withdraw_accept_keyboard, crypto_withdraw_keyboard
 
 # Шаблоны сообщений
-from bot.keyboards import user_stat_message, platform_stat_message
+from keyboards import user_stat_message, platform_stat_message
 
 # Уведомления
-from bot.notifications import start_notification, deposit_success_notification, referral_deposit_notification
+from notifications import start_notification, deposit_success_notification, referral_deposit_notification
 
 # Список администраторов
-from bot.config import bot_name, admins, SPIN_TEXT, dollar, ROFL_VIDEO_ID
+from config import bot_name, admins, SPIN_TEXT, dollar, ROFL_VIDEO_ID, BOT_TOKEN
 
-from bot.joe_game import get_casino_values, is_winning_combo
+from joe_game import get_casino_values, is_winning_combo
 
-from bot.qiwi import create_qiwi_payment_link, check_qiwi_payment_status, pay_withdraw
-from bot.coinbase import create_coinbase_payment_link, check_coinbase_payment_status
+from qiwi import create_qiwi_payment_link, check_qiwi_payment_status, pay_withdraw
+from coinbase import create_coinbase_payment_link, check_coinbase_payment_status
 
-from bot.google_api import upload_statistics, upload_channels_statistics
+from google_api import upload_statistics, upload_channels_statistics
 
 
 # Токен берётся из переменной окружения (можно задать через systemd unit)
-token = getenv("BOT_TOKEN")
+#token = getenv("BOT_TOKEN")
+token = BOT_TOKEN
 if not token:
     exit("Error: no token provided")
+
+# Задаем часовой пояс бота
+tz = pytz.timezone('Europe/Moscow')
+# print(datetime.now(tz=tz))
 
 
 # log level
@@ -97,7 +108,7 @@ logging.basicConfig(level=logging.INFO)"""
 
 def schedule_jobs():
     scheduler.add_job(checking_deposits, "interval", seconds=300)
-    scheduler.add_job(prepare_daily_statistics, "cron", hour='0', minute='0', timezone='utc')
+    scheduler.add_job(prepare_daily_statistics, "cron", hour='0', minute='0', timezone='Europe/Moscow')
     scheduler.add_job(prepare_ads_stats, "interval", seconds=3600)
     scheduler.add_job(send_mailings, "interval", seconds=60)
     # scheduler.add_job(update_admins, "interval", seconds=3700)
@@ -132,7 +143,7 @@ async def checking_deposits():
         for deposit in deposits:
             datetime_format = "%Y-%m-%d %H:%M:%S.%f"
             payment_datetime = datetime.strptime(deposit['date'], datetime_format)
-            if datetime.utcnow()-payment_datetime > timedelta(seconds=6000):
+            if datetime.now(tz=tz)-payment_datetime > timedelta(seconds=6000):
                 # Удалить платеж
                 update_deposit_status(deposit=deposit, new_status="EXPIRED")
                 print(f"Просрочен платеж {deposit['deposit_id']} на сумму {deposit['amount']}")
@@ -143,27 +154,30 @@ async def checking_deposits():
                 elif deposit['deposit_type'] == "COINBASE":
                     deposit_status = check_coinbase_payment_status(deposit)
                     pass
-                if deposit_status == 'PAID':
+                if deposit_status == 'PAID' or deposit_status == 'COMPLETED':
                     # Обработка успешного платежа
+                    user = get_user(deposit['user_id'])
                     update_deposit_status(deposit=deposit, new_status='PAID')
-                    update_balance(user_id=deposit['user_id'],
+                    update_balance(user_id=user['user_id'],
                                    delta_money=float(deposit['amount']),
+                                   delta_promo_money=0.0,
                                    delta_insurance=float(deposit['amount'])*0.1)
-                    await send_balance_update(deposit['user_id'], deposit['amount'])
-                    create_notification(user_id=deposit['user_id'],
+                    await send_balance_update(user['user_id'], deposit['amount'])
+                    create_notification(user_id=user['user_id'],
                                         notification_text=deposit_success_notification(amount=deposit['amount']))
-                    save_action(user_id=deposit['user_id'],
-                                action=f"DEPOSIT: Пользователь {deposit['user_id']} пополнил баланс на {deposit['amount']}",
+                    save_action(user_id=user['user_id'],
+                                action=f"DEPOSIT: Пользователь {user['user_name']} пополнил баланс на {deposit['amount']}",
                                 action_type="DEPOSIT")
                     # отметка о пополнении у реферала
-                    referrer_id = get_referrer(user_id=deposit['user_id'])
+                    referrer_id = get_referrer(user_id=user['user_id'])
                     if referrer_id.startswith('r'):
                         channel = get_channel(channel_code=referrer_id)
                         channel['channel_deposits_num'] += 1
                         channel['channel_deposits_sum'] += deposit['amount']
                         update_channel(channel)
                     else:
-                        update_balance(user_id=referrer_id, delta_money=deposit['amount']*0.1, delta_insurance=0.0)
+                        update_balance(user_id=referrer_id, delta_money=deposit['amount']*0.1,
+                                       delta_promo_money=0.0, delta_insurance=0.0)
                         create_notification(user_id=referrer_id,
                                             notification_text=referral_deposit_notification(user_name=get_user(deposit['user_id'])['user_name'],
                                                                                             amount=deposit['amount']))
@@ -243,7 +257,7 @@ async def send_mailings():
             try:
                 time_format = '%Y-%m-%d %H:%M'
                 mailing_date = datetime.strptime(mailing['mailing_date'], time_format)
-                if mailing_date < datetime.utcnow():
+                if mailing_date < datetime.now(tz=tz):
                     users = get_all_users()  # Рассылка по всем пользователям
                     # users = (get_user(330639572), get_user(333583210))  # Рассылка по заданному списку пользователей
                     for user in users:
@@ -306,8 +320,10 @@ async def cmd_start(message: types.Message, state: FSMContext):
             referrer_id = int(referrer_id)
             if message.from_user['id'] != referrer_id and get_user(referrer_id):
                 referrer = referrer_id
+                print(referrer_id, 'is user')
         elif referrer_id.startswith('r') and get_channel(channel_code=referrer_id):
             referrer = referrer_id
+            print(referrer_id, 'is channel')
 
     # Проверка регистрации
     if register_user(message.from_user['id'], message.from_user['username']):
@@ -332,7 +348,7 @@ async def ready_to_start(call: types.CallbackQuery):
     if call.from_user['username']:
         update_username(user_id=call.from_user['id'], user_name=call.from_user['username'])
         create_notification(user_id=call.from_user['id'],
-                            notification_text=start_notification(user_name={call.from_user['username']}))
+                            notification_text=start_notification(user_name=call.from_user['username']))
         save_action(user_id=call.from_user['id'],
                     action=f"REGISTRATION: Пользователь {call.from_user['username']} успешно зарегистрировался",
                     action_type="REGISTRATION")
@@ -347,11 +363,10 @@ async def ready_to_start(call: types.CallbackQuery):
 """
 @dp.message_handler(content_types=[types.ContentType.VIDEO])
 async def download_doc(message: types.Message):
-    document = message.video
+    document = str(message.video)
     print(document)
-    await message.answer("Файл получен")
+    await message.answer(document)
 """
-
 
 # Обработка команды отмена в админ панели
 @dp.message_handler(state=States.admin_blocking, commands='отмена')
@@ -400,13 +415,15 @@ async def play_joe(call: types.CallbackQuery, state: FSMContext):
     await States.playing_joe.set()
     user = get_user(user=call.from_user['id'])
     balance = round(float(user['balance']), 2)
+    promo_balance = round(float(user['promo_balance']), 2)
     insurance = round(float(user['insurance']), 2)
-    result = 0.
-    await state.update_data(balance=balance, stake=1.)
-    await state.update_data(insurance=insurance, stake=0.)
-    await state.update_data(result=0.)
-    await state.update_data(stake=1.0)
-    await call.message.answer(text=joe_message(balance, result, insurance),
+    result = 0.0
+    await state.update_data(balance=balance, promo_balance=promo_balance, insurance=insurance, stake=1.0, result=0.0)
+    # await state.update_data(promo_balance=promo_balance, stake=1.0)
+    # await state.update_data(insurance=insurance, stake=0.0)
+    # await state.update_data(result=0.0)
+    # await state.update_data(stake=1.0)
+    await call.message.answer(text=joe_message(balance, promo_balance, result, insurance),
                               parse_mode='HTML', reply_markup=joe_keyboard('1.0'))
     await call.answer()
 
@@ -416,9 +433,10 @@ async def stake_down(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     user_stake = round(float(user_data.get("stake", 1.0)), 2)
     user_balance = round(float(user_data.get("balance")), 2)
+    user_promo_balance = round(float(user_data.get("promo_balance")), 2)
     if user_stake > 1.0:
-        if user_stake > user_balance:
-            user_stake = user_balance
+        if user_stake > user_balance + user_promo_balance:
+            user_stake = user_balance + user_promo_balance
             await message.answer(f"Понижаю ставку до допустимого значения\nСтавка  =  ${user_stake}",
                                  reply_markup=joe_keyboard(user_stake))
         else:
@@ -426,7 +444,7 @@ async def stake_down(message: types.Message, state: FSMContext):
             await message.answer(f"Понижаю ставку на $1\nСтавка  =  ${user_stake}",
                                  reply_markup=joe_keyboard(user_stake))
         await state.update_data(stake=user_stake)
-        await message.answer(f"Понижаю ставку на $1\nСтавка  =  ${user_stake}", reply_markup=joe_keyboard(user_stake))
+        # await message.answer(f"Понижаю ставку на $1\nСтавка  =  ${user_stake}", reply_markup=joe_keyboard(user_stake))
     else:
         await message.answer("Ставку меньше $1 можно установить из заданных, нажмите «Ставка»", reply_markup=joe_keyboard(user_stake))
     await message.delete()
@@ -437,12 +455,13 @@ async def stake_up(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     user_stake = round(float(user_data.get("stake", 1.)), 2)
     user_balance = round(float(user_data.get("balance")), 2)
-    if user_stake < user_balance:
+    user_promo_balance = round(float(user_data.get("promo_balance")), 2)
+    if user_stake+1.0 <= user_balance + user_promo_balance:
         user_stake = user_stake + 1.0
         await state.update_data(stake=user_stake)
         await message.answer(f"Повышаю ставку на $1\nСтавка  =  ${user_stake}", reply_markup=joe_keyboard(user_stake))
     else:
-        user_stake = user_balance
+        user_stake = user_balance + user_promo_balance
         await message.answer("Ставка не может превышать баланс", reply_markup=joe_keyboard(user_stake))
     await message.delete()
 
@@ -450,7 +469,7 @@ async def stake_up(message: types.Message, state: FSMContext):
 @dp.message_handler(Text(equals="Max ставка"), state=States.playing_joe)
 async def stake_max(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
-    user_stake = round(float(user_data.get("balance")), 2)
+    user_stake = round(float(user_data.get("balance")) + float(user_data.get("promo_balance")), 2)
     await state.update_data(stake=user_stake)
     await message.answer(f"Повышаю ставку до максимальной\nСтавка  =  ${user_stake}",
                          reply_markup=joe_keyboard(user_stake))
@@ -472,9 +491,10 @@ async def stake_back(call: types.CallbackQuery, state: FSMContext):
     await call.message.delete()
     user_data = await state.get_data()
     user_balance = round(float(user_data.get("balance")), 2)
+    user_promo_balance = round(float(user_data.get("promo_balance")), 2)
     user_stake = round(float(user_data.get("stake", 1.0)), 2)
     stake = round(float(call.data.split('_')[1]), 2)
-    if stake < user_balance:
+    if stake < user_balance + user_promo_balance:
         user_stake = stake
         await state.update_data(stake=user_stake)
         await call.message.answer(f"Ставка  =  ${user_stake}",
@@ -490,12 +510,13 @@ async def make_spin(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     user_stake = round(float(user_data.get("stake", 1.0)), 2)
     user_balance = round(float(user_data.get("balance")), 2)
+    user_promo_balance = round(float(user_data.get("promo_balance")), 2)
     user_insurance = round(float(user_data.get("insurance")), 2)
     #print("Начинаю крутить\nbalance =", user_balance, "\ninsurance =", user_insurance, "\nstake =", user_stake)
-    if user_stake > user_balance:
+    if user_stake > user_balance + user_promo_balance:
         await message.answer("Ваша ставка превышает баланс")
         return
-    if user_balance == 0.0:
+    if user_balance == 0.0 and user_promo_balance == 0.0:
         await message.answer("Ваш баланс равен нулю")
         return
 
@@ -509,19 +530,31 @@ async def make_spin(message: types.Message, state: FSMContext):
     # Проверяем, выигрышная комбинация или нет, обновляем счёт
     is_win, rate = is_winning_combo(dice_combo)
     delta = round(float(user_stake) * rate, 2)
-    update_balance(user_id=message.from_user['id'], delta_money=delta, delta_insurance=0.0)
-    user_balance = round(user_balance + delta, 2)
-    await state.update_data(balance=user_balance)
-    await state.update_data(result=delta)
-    # Готовим сообщение о выигрыше/проигрыше и
     if is_win:
+        user_balance = round(user_balance + delta, 2)
+        update_balance(user_id=message.from_user['id'], delta_promo_money=0.0, delta_money=delta, delta_insurance=0.0)
         save_action(user_id=message.from_user['id'],
                     action=f"WIN: Пользователь {message.from_user['username']} выиграл ${delta}",
                     action_type="WIN")
     else:
+        if user_promo_balance >= (-delta):
+            user_promo_balance = round(user_promo_balance + delta, 2)
+            update_balance(user_id=message.from_user['id'], delta_promo_money=delta, delta_money=0.0,
+                           delta_insurance=0.0)
+        elif 0 < user_promo_balance < -delta:
+            user_balance = round(user_balance + user_promo_balance + delta, 2)
+            user_promo_balance = 0.0
+            update_balance(user_id=message.from_user['id'], delta_promo_money=-user_promo_balance,
+                           delta_money=user_promo_balance + delta, delta_insurance=0.0)
+        else:
+            user_balance = round(user_balance + delta, 2)
+            update_balance(user_id=message.from_user['id'], delta_promo_money=0.0, delta_money=delta,
+                           delta_insurance=0.0)
         save_action(user_id=message.from_user['id'],
                     action=f"LOSE: Пользователь {message.from_user['username']} проиграл ${delta}",
                     action_type="LOSE")
+    await state.update_data(balance=user_balance, promo_balance=user_promo_balance,
+                            insurance=user_insurance, result=delta)
 
     # Имитируем задержку и отправляем ответ пользователю
     await sleep(2)
@@ -531,7 +564,8 @@ async def make_spin(message: types.Message, state: FSMContext):
             user_insurance = 0.0
             await state.update_data(insurance=user_insurance)
             await state.update_data(balance=user_balance)
-            update_balance(user_id=message.from_user['id'], delta_money=user_balance, delta_insurance=-user_balance)
+            update_balance(user_id=message.from_user['id'], delta_money=user_balance,
+                           delta_promo_money=0.0, delta_insurance=-user_balance)
             save_action(user_id=message.from_user['id'],
                         action=f"INSURANCE: Пользователь {message.from_user['username']} "
                                f"воспользовался страховкой на сумму {user_balance}",
@@ -539,7 +573,7 @@ async def make_spin(message: types.Message, state: FSMContext):
             create_notification(user_id=message.from_user['id'],
                                 notification_text=f"Ваш счет пополнен на сумму {user_balance} за счет страховки")
             await message.answer(f"Ваш счет пополнен на сумму {user_balance} за счет страховки")
-    await msg.reply(joe_message(user_balance, delta, user_insurance),
+    await msg.reply(joe_message(user_balance, user_promo_balance, delta, user_insurance),
                     parse_mode='HTML', reply_markup=joe_keyboard(user_stake))
 ########################################################################################################################
 
@@ -562,7 +596,9 @@ async def exit_to_main_menu(message: types.Message, state: FSMContext):
 @dp.message_handler(text='Баланс')
 async def cmd_balance(message: types.Message, state: FSMContext):
     user = get_user(message.from_user['id'])
-    await message.answer(f"Ваш баланс составляет: {user['balance']}\nСтраховка: {user['insurance']}",
+    await message.answer(f"Ваш баланс составляет: {user['balance']}$\n"
+                         f"Баланс с промокодов: {user['promo_balance']}$\n"
+                         f"Страховка: {user['insurance']}$",
                          reply_markup=balance_keyboard())
 
 
@@ -570,7 +606,7 @@ async def cmd_balance(message: types.Message, state: FSMContext):
 @dp.callback_query_handler(Text(equals="deposit"))
 async def cmd_deposit(call: types.CallbackQuery):
     await States.entering_deposit.set()
-    await call.message.answer("Введите сумму пополнения ($). Минимальная сумма пополнения 1$",
+    await call.message.answer("Введите сумму пополнения ($). Минимальная сумма пополнения 3$",
                               reply_markup=cancel_keyboard())
     await call.answer()
 
@@ -580,11 +616,12 @@ async def cmd_deposit(call: types.CallbackQuery):
 async def cmd_deposit_create(message: types.Message, state: FSMContext):
     try:
         amount = float(message.text)
-        if 0 < amount < 1.0:
-            await message.answer("Минимальная сумма пополнения 1$", reply_markup=cancel_keyboard())
-        elif amount >= 1.0:
+        if 0 < amount < 3.0:
+            await message.answer("Минимальная сумма пополнения 3$", reply_markup=cancel_keyboard())
+        elif amount >= 3.0:
             await state.finish()
-            await message.answer(f"Выберете метод оплаты:", reply_markup=deposit_method_keyboard(message.from_user['id'], message.text))
+            await message.answer(f"Выберете метод оплаты:",
+                                 reply_markup=deposit_method_keyboard(message.from_user['id'], message.text))
         else:
             await message.answer("Сумма пополнения введена неверно, введите число еще раз",
                                  reply_markup=cancel_keyboard())
@@ -641,6 +678,16 @@ async def cmd_withdraw_create(message: types.Message, state: FSMContext):
         await message.answer("Сумма вывода введена неверно, введите число еще раз", reply_markup=cancel_keyboard())
 
 
+# Определяем монету для вывода крипты
+@dp.callback_query_handler(Text(startswith="crypto-withdraw_"))
+async def cmd_withdraw_crypto(call: types.CallbackQuery, state: FSMContext):
+    await call.message.delete()
+    user_id = call.data.split('_')[1]
+    amount = call.data.split('_')[2]
+    await call.message.answer("Выберете монету", reply_markup=crypto_withdraw_keyboard(user_id, amount))
+    await call.answer()
+
+
 # Фиксируем запрос вывода
 @dp.callback_query_handler(Text(startswith="withdraw_"))
 async def cmd_withdraw_type(call: types.CallbackQuery, state: FSMContext):
@@ -654,7 +701,8 @@ async def cmd_withdraw_type(call: types.CallbackQuery, state: FSMContext):
     if payment_type == 'card':
         await call.message.answer(f"Введите номер карты для перевода", reply_markup=cancel_keyboard())
     else:
-        await call.message.answer(f"Введите номер Bitcoin кошелька для перевода", reply_markup=cancel_keyboard())
+        await call.message.answer(f"Введите номер {str(payment_type).upper()} кошелька для перевода",
+                                  reply_markup=cancel_keyboard())
     await States.entering_withdraw_info.set()
     await call.answer()
 
@@ -727,7 +775,8 @@ async def checking_promocode(message: types.Message, state: FSMContext):
         if not promocode_activated(user_id=message.from_user['id'], promocode_name=promocode['promocode_name']):
             # Добавить денег
             await state.finish()
-            update_balance(user_id=message.from_user['id'], delta_money=promocode['promocode_sum'], delta_insurance=0.0)
+            update_balance(user_id=message.from_user['id'], delta_money=0.0,
+                           delta_promo_money=promocode['promocode_sum'], delta_insurance=0.0)
             activate_promocode(user_id=message.from_user['id'], promocode_name=promocode['promocode_name'])
             save_action(user_id=message.from_user['id'],
                         action=f"PROMOCODE: Пользователь {message.from_user['username']} активировал промокод "
@@ -735,7 +784,7 @@ async def checking_promocode(message: types.Message, state: FSMContext):
             create_notification(user_id=message.from_user['id'],
                                 notification_text=f"Вы успешно активировали промокод {message.text} на {promocode['promocode_sum']}$")
             referrer = get_referrer(user_id=message.from_user['id'])
-            if referrer.startswith('r'):
+            if referrer and referrer.startswith('r'):
                 channel = get_channel(referrer)
                 channel['channel_promocode_num'] += 1
                 channel['channel_promocode_sum'] += promocode['promocode_sum']
@@ -848,7 +897,8 @@ async def yes_delete_notification(call: types.CallbackQuery):
     withdraw = get_withdraw(withdraw_id=call.data.split('_')[1])
     user = get_user(withdraw['user_id'])
     if user['balance'] >= withdraw['amount']:
-        update_balance(withdraw['user_id'], delta_money=-withdraw['amount'], delta_insurance=0.0)
+        update_balance(withdraw['user_id'], delta_money=-withdraw['amount'],
+                       delta_promo_money=0.0, delta_insurance=0.0)
         withdraw['status'] = 'PAID'
         update_withdraw(withdraw)
         await call.message.answer(text=f"Вывод отправлен на обработку", reply_markup=admin_keyboard())
@@ -1160,7 +1210,7 @@ async def admin_mailing_edit(call: types.CallbackQuery, state: FSMContext):
 async def admin_mailings_date(message: types.Message, state: FSMContext):
     try:
         post_time = datetime.strptime(message.text, "%Y-%m-%d %H:%M")
-        if post_time > datetime.utcnow():
+        if post_time > datetime.now(tz=tz):
             await States.administrating.set()
             fsm_data = await state.get_data()
             mailing_id = fsm_data.get("mailing_id")
@@ -1237,7 +1287,7 @@ async def yes_block_user(call: types.CallbackQuery, state: FSMContext):
 # Обработка команды админ Статистика
 @dp.message_handler(text='Статистика', state=States.administrating)
 async def admin_stat(message: types.Message, state: FSMContext):
-    date = str(datetime.utcnow()-timedelta(days=1))[:10]
+    date = str(datetime.now(tz=tz)-timedelta(days=1))[:10]
     stats = get_platform_statistics(date)
     if stats:
         await message.answer(platform_stat_message(stats), reply_markup=statistics_keyboard())
@@ -1286,6 +1336,17 @@ async def admin_stat_user_2(call: types.CallbackQuery, state: FSMContext):
     else:
         await call.message.answer("Что-то пошло не так", reply_markup=admin_keyboard())
     await call.answer()
+########################################################################################################################
+
+
+########################################################################################################################
+# Обработка команды админ Константы
+@dp.message_handler(text='Константы', state=States.administrating)
+async def admin_stat(message: types.Message, state: FSMContext):
+    await message.answer("Текущие константы платформы:", reply_markup=admin_keyboard())
+    constants = get_constants()
+    for constant in constants:
+        await message.answer(f"{constant['constant_name']} = {constant['value']}", reply_markup=admin_keyboard())
 ########################################################################################################################
 
 

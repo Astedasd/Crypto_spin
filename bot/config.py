@@ -1,6 +1,5 @@
 import requests
 import json
-import re
 from datetime import datetime
 
 
@@ -31,8 +30,9 @@ def RealTimeCurrencyExchangeRate(from_currency, to_currency, api_key):
 
 
 # Имя бота
-bot_name = "dew_test_bot"
+bot_name = "Crypto_Spin_Bot"
 bot_link = f"https://t.me/{bot_name}"
+BOT_TOKEN = "1770088350:AAEJ3eKwmsmojeRZxWarjTKioZuJ7YAniKo"
 
 # Права администратора
 admins = (330639572, 1537126137, 410785491, 1417744142, 333583210)
@@ -48,4 +48,5 @@ api_access_token = "R84796LA6M723U47"
 
 COINBASE_API_KEY = "2db246d3-d58d-4a52-9aaa-421b64bf7874"
 
-ROFL_VIDEO_ID = "BAACAgIAAxkBAAIqQWFDRGYeUYwsHagnHB9YUf-C6o3AAAL4DQACgkgYSki1Hogj89koIAQ"
+# ROFL_VIDEO_ID = "BAACAgIAAxkBAAIqQWFDRGYeUYwsHagnHB9YUf-C6o3AAAL4DQACgkgYSki1Hogj89koIAQ"
+ROFL_VIDEO_ID = "BAACAgIAAxkBAAMgYVGnQcYUEyOLxL95ASh0coNdfXEAAlAUAAK3oohKOn3hLQFVy28hBA"

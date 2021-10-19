@@ -1,10 +1,10 @@
 import requests
 import json
-from bot.config import public_key, secret_key, dollar
-# from bot.config import api_access_token
+from config import public_key, secret_key, dollar
+# from config import api_access_token
 from datetime import datetime, timedelta
 import time
-from bot.db_service import create_deposit, get_withdraw
+from db_service import create_deposit, get_withdraw
 import random
 
 """
@@ -111,3 +111,5 @@ def pay_withdraw(withdraw):
     return res.json()
     pass
 
+
+# print(qiwi_balance())

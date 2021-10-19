@@ -1,18 +1,18 @@
 import gspread
 import os
-from bot.db_service import prepare_channels_stat
+from db_service import prepare_channels_stat
 
 #cred = os.path.join(DEFAULT_CONFIG_DIR, 'service_account.json')
 #gc = gspread.service_account(filename='gspread/service_account.json')
 # gc = gspread.service_account()
-# sh = gc.open_by_key("1ucs0x5Q-c0qLwWILh9ynde74D_zB0cIxCllsDLRhnnU")
+# sh = gc.open_by_key("1Pn8sKJBA14DGXNNRfWHbIBtawp1lBeYr26E_PIii0w8")
 
 # print(sh.sheet1.get('A1'))
 
 
 def upload_statistics(stats):
     gc = gspread.service_account()
-    sh = gc.open_by_key("1ucs0x5Q-c0qLwWILh9ynde74D_zB0cIxCllsDLRhnnU")
+    sh = gc.open_by_key("1Pn8sKJBA14DGXNNRfWHbIBtawp1lBeYr26E_PIii0w8")
     worksheet = sh.get_worksheet(1)
     new_row_number = len(worksheet.col_values(1)) + 1
     worksheet.update(f'A{new_row_number}:P{new_row_number}',
@@ -38,7 +38,7 @@ def upload_statistics(stats):
 
 def upload_channels_statistics(channels):
     gc = gspread.service_account()
-    sh = gc.open_by_key("1ucs0x5Q-c0qLwWILh9ynde74D_zB0cIxCllsDLRhnnU")
+    sh = gc.open_by_key("1Pn8sKJBA14DGXNNRfWHbIBtawp1lBeYr26E_PIii0w8")
     worksheet = sh.get_worksheet(2)
     # new_row_number = len(worksheet.col_values(1)) + 1
     i = 2
@@ -60,4 +60,4 @@ def upload_channels_statistics(channels):
     pass
 
 
-upload_channels_statistics(prepare_channels_stat())
+# upload_channels_statistics(prepare_channels_stat())

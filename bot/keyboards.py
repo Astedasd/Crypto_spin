@@ -1,7 +1,7 @@
 from aiogram import types
 from aiogram.utils.markdown import hbold
-from bot.db_service import get_new_notifications_number
-from bot.config import admins, SPIN_TEXT
+from db_service import get_new_notifications_number
+from config import admins, SPIN_TEXT
 
 
 def start_keyboard():
@@ -50,7 +50,7 @@ def support_keyboard():
 
 def admin_keyboard():
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    buttons = ('Выводы', 'Промокоды', 'Реф. ссылки', 'Рассылки', 'Заблокировать', 'Статистика', 'Выход')
+    buttons = ('Выводы', 'Промокоды', 'Реф. ссылки', 'Рассылки', 'Заблокировать', 'Статистика', 'Константы', 'Выход')
     keyboard.add(*(types.KeyboardButton(text) for text in buttons))
     return keyboard
 
@@ -147,7 +147,7 @@ def deposit_method_keyboard(user_id: int, amount: float):
     """
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     keyboard.add(types.InlineKeyboardButton(text='QIWI ($/₽)', callback_data=f'deposit_{user_id}_qiwi_{amount}'))
-    keyboard.add(types.InlineKeyboardButton(text='BTC/ETH', callback_data=f'deposit_{user_id}_crypto_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='Крипта', callback_data=f'deposit_{user_id}_crypto_{amount}'))
     return keyboard
 
 
@@ -160,7 +160,20 @@ def withdraw_method_keyboard(user_id: int, amount: float):
     """
     keyboard = types.InlineKeyboardMarkup(row_width=1)
     keyboard.add(types.InlineKeyboardButton(text='VISA/MasterCard', callback_data=f'withdraw_{user_id}_card_{amount}'))
-    keyboard.add(types.InlineKeyboardButton(text='BTC', callback_data=f'withdraw_{user_id}_crypto_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='Крипта', callback_data=f'crypto-withdraw_{user_id}_{amount}'))
+    return keyboard
+
+
+def crypto_withdraw_keyboard(user_id: int, amount: float):
+    # BTC, ETH, USDC, DAI, BCH, LTC, DOGE
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(types.InlineKeyboardButton(text='BTC', callback_data=f'withdraw_{user_id}_btc_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='ETH', callback_data=f'withdraw_{user_id}_eth_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='USDC', callback_data=f'withdraw_{user_id}_usdc_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='DAI', callback_data=f'withdraw_{user_id}_dai_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='BCH', callback_data=f'withdraw_{user_id}_bch_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='LTC', callback_data=f'withdraw_{user_id}_ltc_{amount}'))
+    keyboard.add(types.InlineKeyboardButton(text='DOGE', callback_data=f'withdraw_{user_id}_doge_{amount}'))
     return keyboard
 
 
@@ -215,6 +228,11 @@ def spin_keyboard():
     return types.ReplyKeyboardMarkup([["🎰"]], resize_keyboard=True)
 
 
-def joe_message(balance, result, insurance):
-    return f"{hbold('Ваш счёт: ')}{balance}$\n{hbold('Результат: ')}{result}$\n{hbold('Страховка: ')}{insurance}$\n" \
-           f"________________\n{hbold('Bar Bar Bar')} – {hbold('x5')}\n7️⃣ 7️⃣ 7️⃣ – {hbold('x3')}\n🍋🍋🍋  – {hbold('x2')}\n🍒🍒🍒 – {hbold('x2')}  \n"
+def joe_message(balance, promo_balance, result, insurance):
+    return f"{hbold('Ваш счёт: ')}{balance}$\n{hbold('Баланс с промокодов: ')}{promo_balance}$\n" \
+           f"{hbold('Результат: ')}{result}$\n{hbold('Страховка: ')}{insurance}$\n" \
+           f"________________\n" \
+           f"{hbold('Bar Bar Bar')} – {hbold('x5')}\n" \
+           f"7️⃣ 7️⃣ 7️⃣ – {hbold('x3')}\n" \
+           f"🍋🍋🍋  – {hbold('x2')}\n" \
+           f"🍒🍒🍒 – {hbold('x2')}  \n"

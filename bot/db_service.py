@@ -1,7 +1,11 @@
 import sqlite3
 from datetime import datetime, timedelta
-from bot.config import bot_name
+from config import bot_name
 import random
+import pytz
+
+
+tz = pytz.timezone('Europe/Moscow')
 
 
 # Подключение к БД
@@ -11,6 +15,32 @@ def connect_db():
     return con, cur
 
 
+def get_constants():
+    con, cur = connect_db()
+    cur.execute(f"""SELECT constant_name, value FROM constants""")
+    data = cur.fetchall()
+    constants = []
+    if data:
+        for row in data:
+            constants.append({
+                "constant_name": row[0],
+                "value": row[1]
+            })
+        return constants
+    else:
+        raise Exception("Проблемы с выводом констант")
+
+
+def update_constants(constants):
+    con, cur = connect_db()
+    for constant in constants:
+        cur.execute(f"""UPDATE constants SET value = '%s'
+                    WHERE constant_name = '%s'""" % (constant['value'], constant['constant_name']))
+    con.commit()
+    con.close()
+    pass
+
+
 # Команды для бд
 def register_user(user_id, user_name):
     # Чекаем регистрацию
@@ -18,16 +48,17 @@ def register_user(user_id, user_name):
     con, cur = connect_db()
     if not get_user(user_id):
         # регистрируем
-        balance = insurance = deposit_total = withdraw_total = 0.0
+        balance = promo_balance = insurance = deposit_total = withdraw_total = 0.0
         referral_code = ""
         referrals = 0
         referral_bonus = 0.0
-        registration_date = str(datetime.utcnow())[0:19]
+        registration_date = str(datetime.now(tz=tz))[0:19]
         print("Регистрирую пользователя '%s'" % user_id)
-        data = (user_id, user_name, balance, insurance, registration_date, deposit_total, withdraw_total, referral_code,
-                referrals, referral_bonus)
-        cur.execute(f"""INSERT INTO users (user_id, user_name, balance, insurance, registration_date, deposit_total,
-                    withdraw_total, referral_code, referrals, referral_bonus) VALUES (?,?,?,?,?,?,?,?,?,?)""", data)
+        data = (user_id, user_name, balance, promo_balance, insurance, registration_date, deposit_total, withdraw_total,
+                referral_code, referrals, referral_bonus)
+        cur.execute(f"""INSERT INTO users (user_id, user_name, balance, promo_balance, insurance, registration_date,
+                    deposit_total, withdraw_total, referral_code, referrals, referral_bonus)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?)""", data)
         con.commit()
         con.close()
         return True
@@ -53,11 +84,11 @@ def get_user(user):
     """
     con, cur = connect_db()
     if type(user) == int:
-        cur.execute(f"""SELECT user_id, user_name, balance, insurance, registration_date, deposit_total, withdraw_total,
-                        referral_code, referrals, referral_bonus FROM users WHERE user_id = '%s'""" % user)
+        cur.execute(f"""SELECT user_id, user_name, balance, promo_balance, insurance, registration_date, deposit_total,
+                    withdraw_total, referral_code, referrals, referral_bonus FROM users WHERE user_id = '%s'""" % user)
     else:
-        cur.execute(f"""SELECT user_id, user_name, balance, insurance, registration_date, deposit_total, withdraw_total,
-                        referral_code, referrals, referral_bonus FROM users WHERE user_name = '%s'""" % user)
+        cur.execute(f"""SELECT user_id, user_name, balance, promo_balance, insurance, registration_date, deposit_total,
+                    withdraw_total, referral_code, referrals, referral_bonus FROM users WHERE user_name = '%s'""" % user)
     data = cur.fetchone()
     con.close()
     if data:
@@ -65,13 +96,14 @@ def get_user(user):
             "user_id": data[0],
             "user_name": data[1],
             "balance": round(data[2], 2),
-            "insurance": round(data[3], 2),
-            "registration_date": data[4],
-            "deposit_total": round(data[5], 2),
-            "withdraw_total": round(data[6], 2),
-            "referral_code": data[7],
-            "referrals": data[8],
-            "referral_bonus": round(data[9], 2),
+            "promo_balance": round(data[3], 2),
+            "insurance": round(data[4], 2),
+            "registration_date": data[5],
+            "deposit_total": round(data[6], 2),
+            "withdraw_total": round(data[7], 2),
+            "referral_code": data[8],
+            "referrals": data[9],
+            "referral_bonus": round(data[10], 2),
         }
         return user
     else:
@@ -82,7 +114,8 @@ def get_user(user):
 
 def get_all_users():
     con, cur = connect_db()
-    cur.execute(f"""SELECT * FROM users""")
+    cur.execute(f"""SELECT user_id, user_name, balance, promo_balance, insurance, registration_date, deposit_total,
+                    withdraw_total, referral_code, referrals, referral_bonus FROM users""")
     data = cur.fetchall()
     users = []
     if data:
@@ -91,13 +124,14 @@ def get_all_users():
                 "user_id": user[0],
                 "user_name": user[1],
                 "balance": round(user[2], 2),
-                "insurance": round(user[3], 2),
-                "registration_date": user[4],
-                "deposit_total": round(user[5], 2),
-                "withdraw_total": round(user[6], 2),
-                "referral_code": user[7],
-                "referrals": user[8],
-                "referral_bonus": round(user[9], 2),
+                "promo_balance": round(user[3], 2),
+                "insurance": round(user[4], 2),
+                "registration_date": user[5],
+                "deposit_total": round(user[6], 2),
+                "withdraw_total": round(user[7], 2),
+                "referral_code": user[8],
+                "referrals": user[9],
+                "referral_bonus": round(user[10], 2),
             })
     return users
 
@@ -119,9 +153,12 @@ def get_referrals(user_id):
 def get_referrer(user_id):
     con, cur = connect_db()
     cur.execute(f"""SELECT user_id FROM referrals WHERE referral_id = '%s'""" % user_id)
-    referrer = cur.fetchone()[0]
+    data = cur.fetchone()
     con.close()
-    return referrer
+    if data:
+        return data[0]
+    else:
+        return False
 
 
 def set_referral(user_id: str, referral_id: int):
@@ -132,14 +169,15 @@ def set_referral(user_id: str, referral_id: int):
     :return:
     """
     con, cur = connect_db()
-    data = (user_id, referral_id)
-    cur.execute(f"""INSERT INTO referrals (user_id, referral_id) VALUES (?,?)""", data)
-    con.commit()
     if user_id.startswith('r'):
+        data = (user_id, referral_id, 0)
         cur.execute(f"""UPDATE channels SET channel_visitors = channel_visitors + 1,
                         channel_registrations = channel_registrations + 1 WHERE channel_code = '%s'""" % user_id)
     else:
+        data = (user_id, referral_id, 1)
         cur.execute(f"""UPDATE users SET referrals = referrals + 1 WHERE user_id = '%s'""" % user_id)
+    cur.execute(f"""INSERT INTO referrals (user_id, referral_id, is_user) VALUES (?,?,?)""", data)
+    con.commit()
     con.close()
 
 
@@ -193,7 +231,10 @@ def get_last_promocode_id():
     cur.execute(f"""SELECT max(promocode_id) FROM promocodes""")
     n = cur.fetchone()[0]
     con.close()
-    return n
+    if n:
+        return n
+    else:
+        return 1
 
 
 def delete_promocode(promocode_id):
@@ -223,13 +264,15 @@ def activate_promocode(user_id, promocode_name):
     con.close()
 
 
-def update_balance(user_id: int, delta_money: float, delta_insurance: float):
+def update_balance(user_id: int, delta_money: float, delta_promo_money: float, delta_insurance: float):
     con, cur = connect_db()
-    cur.execute("""SELECT balance, insurance FROM users WHERE user_id = '%s'""" % user_id)
+    cur.execute("""SELECT balance, promo_balance, insurance FROM users WHERE user_id = '%s'""" % user_id)
     data = cur.fetchone()
     new_balance = round(data[0], 2) + delta_money
-    new_insurance = round(data[1], 2) + delta_insurance
-    cur.execute("""UPDATE users SET balance = '%s', insurance = '%s' WHERE user_id='%s'""" % (new_balance, new_insurance, user_id))
+    new_promo_balance = round(data[1], 2) + delta_promo_money
+    new_insurance = round(data[2], 2) + delta_insurance
+    cur.execute("""UPDATE users SET balance = '%s', promo_balance= '%s', insurance = '%s'
+                    WHERE user_id='%s'""" % (new_balance, new_promo_balance, new_insurance, user_id))
     con.commit()
     con.close()
 
@@ -242,7 +285,7 @@ def create_notification(user_id, notification_text):
         notification_id = int(notification_id) + 1
     else:
         notification_id = int(str(user_id) + "00001")
-    notification_date = str(datetime.utcnow())[0:19]
+    notification_date = str(datetime.now(tz=tz))[0:19]
     data = (notification_id, user_id, notification_text, True, notification_date)
     cur.execute(f"""INSERT INTO notifications (notification_id, user_id, notification_text, is_new, notification_date)
                 VALUES (?,?,?,?,?)""", data)
@@ -253,7 +296,8 @@ def create_notification(user_id, notification_text):
 
 def get_notifications(user_id):
     con, cur = connect_db()
-    cur.execute(f"""SELECT notification_id, notification_text, is_new, notification_date FROM notifications WHERE user_id = '%s'""" % user_id)
+    cur.execute(f"""SELECT notification_id, notification_text, is_new, notification_date FROM notifications
+                    WHERE user_id = '%s'""" % user_id)
     data = cur.fetchall()
     con.close()
     if data:
@@ -502,7 +546,7 @@ def save_action(user_id, action, action_type):
     :return:
     """
     con, cur = connect_db()
-    date = str(datetime.utcnow())[0:19]
+    date = str(datetime.now(tz=tz))[0:19]
     data = (user_id, date, action, action_type)
     cur.execute(f"""INSERT INTO activity (user_id, date, action, action_type) VALUES (?,?,?,?)""", data)
     con.commit()
@@ -511,8 +555,8 @@ def save_action(user_id, action, action_type):
 
 def create_deposit(deposit_id, user_id, amount, link, deposit_type):
     con, cur = connect_db()
-    # date = str(datetime.utcnow())[0:19]
-    date = datetime.utcnow()
+    # date = str(datetime.now(tz=tz))[0:19]
+    date = datetime.now(tz=tz)
     status = 'NEW'
     # print(f"Создан платеж {payment_id} на сумму {amount}")
     data = (deposit_id, user_id, amount, link, status, deposit_type, date)
@@ -557,7 +601,7 @@ def create_withdraw(user_id, amount, withdraw_type):
     sep = '000'
     id_form = (str(user_id), str(random.randint(0, 100000)))
     withdraw_id = sep.join(id_form)
-    date = datetime.utcnow()
+    date = datetime.now(tz=tz)
     data = (withdraw_id, user_id, amount, withdraw_type, "WAITING", date, "None")
     con, cur = connect_db()
     cur.execute("""INSERT INTO withdraws (withdraw_id, user_id, amount, withdraw_type, status, date, withdraw_info) VALUES (?,?,?,?,?,?,?)""", data)
@@ -620,7 +664,7 @@ def update_withdraw(withdraw):
 def prepare_daily_stat():
     con, cur = connect_db()
     datetime.today()
-    yesterday = str(datetime.utcnow()-timedelta(days=1))[:10]+'%'
+    yesterday = str(datetime.now(tz=tz)-timedelta(days=1))[:10]+'%'
     # Считаем депозиты
     cur.execute("""SELECT amount FROM deposits WHERE date LIKE '%s'""" % yesterday)
     deposits = cur.fetchall()
@@ -746,6 +790,6 @@ def insert_admin(user_id: int, user_name: str):
     pass
 
 
-# date = str(datetime.utcnow()-timedelta(days=1))[:10]
+# date = str(datetime.now(tz=tz)-timedelta(days=1))[:10]
 # stats = get_platform_statistics(date)
 # print(stats)

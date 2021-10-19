@@ -1,8 +1,8 @@
 # from coinbase.wallet.client import Client
 from coinbase_commerce.client import Client
-from bot.config import COINBASE_API_KEY, bot_link
+from config import COINBASE_API_KEY, bot_link
 from datetime import datetime
-from bot.db_service import create_deposit
+from db_service import create_deposit
 import random
 import requests
 
@@ -52,19 +52,21 @@ def check_coinbase_payment_status(deposit):
     :param deposit:
     :return:
     """
-    charge = client.charge.retrieve("2b4e1c21-fb70-4b0a-bc4b-4cab7648fa10")
+    charge = client.charge.retrieve(deposit['deposit_id'])
     # print(charge)
     status = charge['timeline'][-1]['status']
     return status
 
 
 # print(create_coinbase_payment_link(330639572, "12.00"))
-deposit = {'deposit_id': "2b4e1c21-fb70-4b0a-bc4b-4cab7648fa10",
+"""
+deposit = {'deposit_id': "7f45335e-6842-4b70-8baa-afb08145be72",
            'user_id': 330639572,
-           'amount': 12.00,
+           'amount': 11.00,
            'link': " ",
            'status': "NEW",
            'deposit_type': "COINBASE",
            'date': ""
            }
-
+"""
+# print(check_coinbase_payment_status(deposit=deposit))
